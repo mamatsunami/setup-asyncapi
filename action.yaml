@@ -8,16 +8,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Check platform support
-      shell: bash
-      run: |
-        ARCH=$(uname -m)
-        if [ "$ARCH" != "x86_64" ]; then
-          echo "Unsupported architecture: $ARCH. Only linux/x64 is available upstream."
-          exit 1
-        fi
-
-    - name: Resolve version
+    - name: Resolve version, OS and arch
       id: meta
       shell: bash
       run: |
@@ -29,14 +20,28 @@ runs:
         else
           VERSION="${{ inputs.version }}"
         fi
+
+        ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$OS" != "linux" && "$OS" != "darwin" ]]; then
+          echo "Unsupported OS: $OS"
+          exit 1
+        fi
+        if [[ "$ARCH" != "x64" && "$ARCH" != "arm64" ]]; then
+          echo "Unsupported architecture: $ARCH"
+          exit 1
+        fi
+
         echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "asset=asyncapi-${OS}-${ARCH}.gz" >> $GITHUB_OUTPUT
 
     - name: Restore cache
       id: cache
       uses: actions/cache@v4
       with:
         path: ~/.local/bin/asyncapi
-        key: asyncapi-${{ steps.meta.outputs.version }}-linux-x64
+        key: asyncapi-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.asset }}
 
     - name: Download and install binary
       if: steps.cache.outputs.cache-hit != 'true'
@@ -44,13 +49,13 @@ runs:
       run: |
         mkdir -p ~/.local/bin
         curl -sfL \
-          https://github.com/${{ github.action_repository }}/releases/download/${{ steps.meta.outputs.version }}/asyncapi-linux-x64.gz \
+          https://github.com/${{ github.action_repository }}/releases/download/${{ steps.meta.outputs.version }}/${{ steps.meta.outputs.asset }} \
           | gunzip > ~/.local/bin/asyncapi
         chmod +x ~/.local/bin/asyncapi
 
     - name: Verify installation
       shell: bash
-      run: asyncapi version
+      run: ~/.local/bin/asyncapi version
 
     - name: Add to PATH
       shell: bash
