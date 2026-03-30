@@ -2,7 +2,7 @@ name: Setup AsyncAPI CLI
 description: Installs the AsyncAPI CLI binary with caching. Only versions published as releases in this repo are available.
 inputs:
   version:
-    description: AsyncAPI CLI version (must be a published release in this repo, e.g. v2.17.0). Defaults to latest published.
+    description: AsyncAPI CLI version (must be a published release, e.g. v2.17.0). Defaults to latest published.
     default: latest
 
 runs:
@@ -15,7 +15,7 @@ runs:
         if [ "${{ inputs.version }}" = "latest" ]; then
           VERSION=$(curl -sf \
             -H "Authorization: Bearer ${{ github.token }}" \
-            https://api.github.com/repos/${{ github.action_repository }}/releases/latest \
+            https://api.github.com/repos/mamatsunami/setup-asyncapi/releases/latest \
             | jq -r .tag_name)
         else
           VERSION="${{ inputs.version }}"
@@ -35,6 +35,7 @@ runs:
 
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "asset=asyncapi-${OS}-${ARCH}.gz" >> $GITHUB_OUTPUT
+        echo "url=https://github.com/mamatsunami/setup-asyncapi/releases/download/${VERSION}/asyncapi-${OS}-${ARCH}.gz" >> $GITHUB_OUTPUT
 
     - name: Restore cache
       id: cache
@@ -48,8 +49,7 @@ runs:
       shell: bash
       run: |
         mkdir -p ~/.local/bin
-        curl -sfL \
-          https://github.com/${{ github.action_repository }}/releases/download/${{ steps.meta.outputs.version }}/${{ steps.meta.outputs.asset }} \
+        curl -sfL ${{ steps.meta.outputs.url }} \
           | gunzip > ~/.local/bin/asyncapi
         chmod +x ~/.local/bin/asyncapi
 
