@@ -16,7 +16,7 @@ jobs:
       - name: Validate version exists upstream
         run: |
           STATUS=$(curl -so /dev/null -w "%{http_code}" \
-            https://api.github.com/repos/asyncapi/cli/releases/tags/${{ github.event.inputs.version }})
+            https://api.github.com/repos/asyncapi/cli/releases/tags/v${{ github.event.inputs.version }})
           if [ "$STATUS" != "200" ]; then
             echo "Version ${{ github.event.inputs.version }} not found upstream"
             exit 1
