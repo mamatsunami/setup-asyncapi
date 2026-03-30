@@ -1,0 +1,53 @@
+name: Publish AsyncAPI binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Upstream asyncapi/cli version tag to publish (e.g. 2.17.0)'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Validate version exists upstream
+        run: |
+          STATUS=$(curl -so /dev/null -w "%{http_code}" \
+            https://api.github.com/repos/asyncapi/cli/releases/tags/${{ github.event.inputs.version }})
+          if [ "$STATUS" != "200" ]; then
+            echo "Version ${{ github.event.inputs.version }} not found upstream"
+            exit 1
+          fi
+
+      - name: Check version not already published
+        run: |
+          STATUS=$(curl -so /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.version }})
+          if [ "$STATUS" = "200" ]; then
+            echo "Version ${{ github.event.inputs.version }} is already published"
+            exit 1
+          fi
+
+      - name: Download and recompress linux x64
+        run: |
+          curl -sfOL https://github.com/asyncapi/cli/releases/download/v${{ github.event.inputs.version }}/asyncapi.tar.gz
+          tar -xzf asyncapi.tar.gz asyncapi/bin/asyncapi
+          gzip -9 -c asyncapi/bin/asyncapi > asyncapi-linux-x64.gz
+          rm -rf asyncapi asyncapi.tar.gz
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: AsyncAPI CLI ${{ github.event.inputs.version }}
+          body: |
+            AsyncAPI CLI ${{ github.event.inputs.version }} — approved and published by ${{ github.actor }}.
+            Upstream release: https://github.com/asyncapi/cli/releases/tag/${{ github.event.inputs.version }}
+
+            **Available platforms:** linux/x64 only (upstream does not ship a linux/arm64 tarball).
+          files: |
+            asyncapi-linux-x64.gz
