@@ -1,0 +1,57 @@
+name: Setup AsyncAPI CLI
+description: Installs the AsyncAPI CLI binary with caching. Only versions published as releases in this repo are available.
+inputs:
+  version:
+    description: AsyncAPI CLI version (must be a published release in this repo, e.g. v2.17.0). Defaults to latest published.
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Check platform support
+      shell: bash
+      run: |
+        ARCH=$(uname -m)
+        if [ "$ARCH" != "x86_64" ]; then
+          echo "Unsupported architecture: $ARCH. Only linux/x64 is available upstream."
+          exit 1
+        fi
+
+    - name: Resolve version
+      id: meta
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          VERSION=$(curl -sf \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            https://api.github.com/repos/${{ github.action_repository }}/releases/latest \
+            | jq -r .tag_name)
+        else
+          VERSION="${{ inputs.version }}"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Restore cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/bin/asyncapi
+        key: asyncapi-${{ steps.meta.outputs.version }}-linux-x64
+
+    - name: Download and install binary
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/.local/bin
+        curl -sfL \
+          https://github.com/${{ github.action_repository }}/releases/download/${{ steps.meta.outputs.version }}/asyncapi-linux-x64.gz \
+          | gunzip > ~/.local/bin/asyncapi
+        chmod +x ~/.local/bin/asyncapi
+
+    - name: Verify installation
+      shell: bash
+      run: asyncapi version
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> $GITHUB_PATH
