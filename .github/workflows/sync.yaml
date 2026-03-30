@@ -4,19 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Upstream asyncapi/cli version tag to publish (e.g. 2.17.0)'
+        description: 'Upstream asyncapi/cli version tag to publish (e.g. v2.17.0)'
         required: true
 
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Validate version exists upstream
         run: |
           STATUS=$(curl -so /dev/null -w "%{http_code}" \
-            https://api.github.com/repos/asyncapi/cli/releases/tags/v${{ github.event.inputs.version }})
+            https://api.github.com/repos/asyncapi/cli/releases/tags/${{ github.event.inputs.version }})
           if [ "$STATUS" != "200" ]; then
             echo "Version ${{ github.event.inputs.version }} not found upstream"
             exit 1
@@ -32,12 +30,70 @@ jobs:
             exit 1
           fi
 
-      - name: Download and recompress linux x64
+  build:
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: x64
+            oclif_target: linux-x64
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+            oclif_target: linux-arm64
+          - runner: macos-13             # Intel macOS
+            os: darwin
+            arch: x64
+            oclif_target: darwin-x64
+          - runner: macos-latest         # Apple Silicon macOS
+            os: darwin
+            arch: arm64
+            oclif_target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Clone asyncapi/cli at tag
         run: |
-          curl -sfOL https://github.com/asyncapi/cli/releases/download/v${{ github.event.inputs.version }}/asyncapi.tar.gz
-          tar -xzf asyncapi.tar.gz asyncapi/bin/asyncapi
-          gzip -9 -c asyncapi/bin/asyncapi > asyncapi-linux-x64.gz
-          rm -rf asyncapi asyncapi.tar.gz
+          git clone --depth 1 --branch ${{ github.event.inputs.version }} \
+            https://github.com/asyncapi/cli.git asyncapi-src
+
+      - name: Install dependencies
+        working-directory: asyncapi-src
+        run: npm ci
+
+      - name: Pack binary
+        working-directory: asyncapi-src
+        run: npx oclif pack tarballs --targets ${{ matrix.oclif_target }} --no-xz
+
+      - name: Extract binary
+        run: |
+          mkdir -p out
+          tar -xzf asyncapi-src/dist/asyncapi-v*-${{ matrix.oclif_target }}.tar.gz \
+            -C out --strip-components=2 asyncapi/bin/asyncapi
+
+      - name: Compress binary
+        run: gzip -9 -c out/asyncapi > asyncapi-${{ matrix.os }}-${{ matrix.arch }}.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asyncapi-${{ matrix.os }}-${{ matrix.arch }}
+          path: asyncapi-${{ matrix.os }}-${{ matrix.arch }}.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -46,8 +102,15 @@ jobs:
           name: AsyncAPI CLI ${{ github.event.inputs.version }}
           body: |
             AsyncAPI CLI ${{ github.event.inputs.version }} — approved and published by ${{ github.actor }}.
-            Upstream release: https://github.com/asyncapi/cli/releases/tag/${{ github.event.inputs.version }}
+            Upstream source: https://github.com/asyncapi/cli/releases/tag/${{ github.event.inputs.version }}
 
-            **Available platforms:** linux/x64 only (upstream does not ship a linux/arm64 tarball).
+            **Available platforms (all built from source):**
+            - linux/x64
+            - linux/arm64
+            - darwin/x64
+            - darwin/arm64
           files: |
-            asyncapi-linux-x64.gz
+            asyncapi-linux-x64/asyncapi-linux-x64.gz
+            asyncapi-linux-arm64/asyncapi-linux-arm64.gz
+            asyncapi-darwin-x64/asyncapi-darwin-x64.gz
+            asyncapi-darwin-arm64/asyncapi-darwin-arm64.gz
